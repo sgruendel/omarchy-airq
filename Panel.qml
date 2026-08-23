@@ -10,6 +10,7 @@ Panel {
 
   property var anchorItem: null
   property var hostWidget: null
+  property string pluginDir: ""
   readonly property var barIdentity: hostWidget || root
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color healthyColor: "#4caf50"
@@ -26,7 +27,12 @@ Panel {
   property int retries: 0
   property real nowMs: Date.now()
   property bool credentialTimedOut: false
+  property bool credentialStoreTimedOut: false
   property bool fetchTimedOut: false
+  property bool credentialEntryVisible: false
+  property string pendingCredential: ""
+  property string credentialLookupSerial: ""
+  property string credentialStoreSerial: ""
 
   readonly property string configuredHost: String(setting("host", ""))
     .replace(/^https?:\/\//, "").replace(/\/+$/, "")
@@ -85,6 +91,8 @@ Panel {
     refresh()
     Qt.callLater(function() {
       if (root.opened) root.setCenterHoverRevealSuppressed(true)
+      if (root.opened && root.credentialEntryVisible)
+        credentialPasswordField.forceActiveFocus()
     })
   }
 
@@ -109,6 +117,31 @@ Panel {
     fetch()
   }
 
+  function credentialStored() {
+    devicePassword = ""
+    credentialEntryVisible = false
+    credentialPasswordField.text = ""
+    fetchError = ""
+    retries = 0
+    fetch()
+  }
+
+  function storeCredential() {
+    if (credentialStoreProc.running || !configuredSerial) return
+    var password = credentialPasswordField.text
+    if (!password) return
+    if (!pluginDir) {
+      failNow("Could not locate the air-Q plugin files")
+      return
+    }
+    credentialStoreSerial = configuredSerial
+    pendingCredential = password
+    credentialStoreTimedOut = false
+    credentialStoreProc.command = [pluginDir + "/scripts/keyring-store.sh", credentialStoreSerial]
+    credentialStoreTimeout.restart()
+    credentialStoreProc.running = true
+  }
+
   function failNow(message) {
     fetching = false
     stale = readings !== null
@@ -126,13 +159,18 @@ Panel {
       fetchError = "Set the device host and serial number in widget settings"
       return
     }
-    if (fetchProc.running || credentialProc.running) return
+    if (fetchProc.running || credentialProc.running || credentialStoreProc.running) return
     if (!devicePassword) {
+      if (credentialEntryVisible) {
+        fetching = false
+        return
+      }
       fetching = true
+      credentialLookupSerial = configuredSerial
       credentialProc.command = [
         "secret-tool", "lookup",
         "application", "omarchy-airq",
-        "serial", configuredSerial
+        "serial", credentialLookupSerial
       ]
       credentialTimedOut = false
       credentialTimeout.restart()
@@ -152,10 +190,16 @@ Panel {
     fetching = false
     var parsed = Model.parseDataResponse(raw, devicePassword)
     if (!parsed) {
-      devicePassword = ""
+      if (retries >= 3) {
+        devicePassword = ""
+        credentialEntryVisible = true
+        failNow("Could not read or decrypt the air-Q response · re-enter the device password")
+        return
+      }
       scheduleRetry("Could not read or decrypt the air-Q response")
       return
     }
+    credentialEntryVisible = false
     readings = parsed
     stale = false
     retries = 0
@@ -178,8 +222,16 @@ Panel {
   onConfiguredHostChanged: Qt.callLater(refresh)
   onConfiguredSerialChanged: {
     devicePassword = ""
-    Qt.callLater(refresh)
+    credentialEntryVisible = false
+    Qt.callLater(function() {
+      credentialPasswordField.text = ""
+      root.refresh()
+    })
   }
+
+  onOpenedChanged: if (!root.opened) credentialPasswordField.text = ""
+  onCredentialEntryVisibleChanged: if (root.credentialEntryVisible && root.opened)
+    Qt.callLater(function() { credentialPasswordField.forceActiveFocus() })
 
   Process {
     id: credentialProc
@@ -189,17 +241,70 @@ Panel {
       credentialTimeout.stop()
       if (root.credentialTimedOut) {
         root.credentialTimedOut = false
+        if (root.credentialLookupSerial !== root.configuredSerial)
+          Qt.callLater(root.fetch)
+        return
+      }
+      if (root.credentialLookupSerial !== root.configuredSerial) {
+        Qt.callLater(root.fetch)
         return
       }
       var secret = String(credentialStdout.text || "").replace(/\r?\n$/, "")
       if (exitCode !== 0 || !secret) {
-        root.failNow(root.processError(credentialStderr.text,
-          "Device password is missing or secret-tool/keyring is unavailable"))
+        root.credentialEntryVisible = true
+        var fallback = exitCode === 1 || (exitCode === 0 && !secret)
+          ? "Enter the device password to continue"
+          : "Could not access GNOME Keyring"
+        root.failNow(root.processError(credentialStderr.text, fallback))
         return
       }
       root.devicePassword = secret
+      root.credentialEntryVisible = false
       root.fetchError = ""
       Qt.callLater(root.fetch)
+    }
+  }
+
+  Process {
+    id: credentialStoreProc
+    stdinEnabled: true
+    stderr: StdioCollector { id: credentialStoreStderr; waitForEnd: true }
+    onStarted: {
+      if (root.credentialStoreSerial === root.configuredSerial)
+        root.devicePassword = root.pendingCredential
+      write(root.pendingCredential + "\n")
+      root.pendingCredential = ""
+      credentialPasswordField.text = ""
+    }
+    onExited: function(exitCode) {
+      credentialStoreTimeout.stop()
+      root.pendingCredential = ""
+      if (root.credentialStoreTimedOut) {
+        root.credentialStoreTimedOut = false
+        if (root.credentialStoreSerial !== root.configuredSerial)
+          Qt.callLater(root.fetch)
+        return
+      }
+      if (root.credentialStoreSerial !== root.configuredSerial) {
+        root.devicePassword = ""
+        root.credentialEntryVisible = false
+        Qt.callLater(root.fetch)
+        return
+      }
+      if (exitCode !== 0) {
+        root.devicePassword = ""
+        root.credentialEntryVisible = true
+        root.failNow(root.processError(credentialStoreStderr.text,
+          "Could not save the device password to GNOME Keyring"))
+        return
+      }
+      root.credentialEntryVisible = false
+      root.fetchError = ""
+      root.retries = 0
+      if (root.hostWidget && typeof root.hostWidget.broadcast === "function")
+        root.hostWidget.broadcast("credentialStored")
+      else
+        Qt.callLater(root.credentialStored)
     }
   }
 
@@ -242,9 +347,11 @@ Panel {
     id: credentialTimeout
     interval: 10000
     onTriggered: {
+      var stillCurrent = root.credentialLookupSerial === root.configuredSerial
       root.credentialTimedOut = true
       credentialProc.running = false
-      root.failNow("secret-tool did not start or respond within 10 seconds")
+      if (stillCurrent)
+        root.failNow("GNOME Keyring did not respond within 10 seconds")
     }
   }
 
@@ -255,6 +362,22 @@ Panel {
       root.fetchTimedOut = true
       fetchProc.running = false
       root.scheduleRetry("air-Q request timed out")
+    }
+  }
+
+  Timer {
+    id: credentialStoreTimeout
+    interval: 10000
+    onTriggered: {
+      var stillCurrent = root.credentialStoreSerial === root.configuredSerial
+      root.credentialStoreTimedOut = true
+      root.pendingCredential = ""
+      root.devicePassword = ""
+      credentialPasswordField.text = ""
+      credentialStoreProc.running = false
+      root.credentialEntryVisible = stillCurrent
+      if (stillCurrent)
+        root.failNow("GNOME Keyring did not save the password within 10 seconds")
     }
   }
 
@@ -287,6 +410,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: credentialPasswordField.activeFocus
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
@@ -418,6 +542,80 @@ Panel {
               font.pixelSize: Style.font.body
               horizontalAlignment: Text.AlignHCenter
               wrapMode: Text.Wrap
+            }
+          }
+
+          Rectangle {
+            visible: root.credentialEntryVisible && root.configuredHost !== ""
+              && root.configuredSerial !== ""
+            width: parent.width
+            height: visible ? credentialColumn.implicitHeight + Style.space(28) : 0
+            radius: Style.cornerRadius
+            color: Qt.rgba(root.barForeground.r, root.barForeground.g,
+                           root.barForeground.b, 0.055)
+
+            Column {
+              id: credentialColumn
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: Style.space(14)
+              anchors.rightMargin: Style.space(14)
+              spacing: Style.space(8)
+
+              Text {
+                width: parent.width
+                text: "Save the device password in GNOME Keyring"
+                color: root.barForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+                textFormat: Text.PlainText
+              }
+
+              Text {
+                width: parent.width
+                text: "The password is sent over stdin and is never stored in widget settings."
+                color: Qt.darker(root.barForeground, 1.45)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+              }
+
+              Row {
+                id: credentialRow
+                width: parent.width
+                spacing: Style.space(8)
+
+                TextField {
+                  id: credentialPasswordField
+                  width: credentialRow.width - saveCredentialButton.width - credentialRow.spacing
+                  password: true
+                  maximumLength: 1024
+                  enabled: !credentialStoreProc.running
+                  placeholderText: "Device password"
+                  foreground: root.barForeground
+                  font.family: root.contentFontFamily
+                  onAccepted: root.storeCredential()
+                  Keys.onEscapePressed: {
+                    credentialPasswordField.text = ""
+                    credentialPasswordField.focus = false
+                  }
+                }
+
+                Button {
+                  id: saveCredentialButton
+                  anchors.verticalCenter: credentialPasswordField.verticalCenter
+                  text: credentialStoreProc.running ? "Saving…" : "Save"
+                  enabled: !credentialStoreProc.running && credentialPasswordField.text.length > 0
+                  opacity: saveCredentialButton.enabled ? 1 : 0.45
+                  bordered: true
+                  foreground: root.barForeground
+                  fontFamily: root.contentFontFamily
+                  onClicked: root.storeCredential()
+                }
+              }
             }
           }
 

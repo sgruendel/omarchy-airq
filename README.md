@@ -17,7 +17,6 @@ retries automatically.
 - Omarchy with the Quickshell desktop shell
 - An air-Q device reachable on the local network
 - `curl`
-- `secret-tool` and an available desktop Secret Service
 - `xdg-open` to open the device page from the widget
 
 ## Install
@@ -29,20 +28,8 @@ omarchy bar set sgruendel.airq serial YOUR_AIRQ_SERIAL
 ```
 
 Use the hostname or IP address only for `host`, without `http://` or a trailing
-slash.
-
-Store the device password in the desktop keyring without adding it to shell
-history:
-
-```bash
-AIRQ_SERIAL="YOUR_AIRQ_SERIAL"
-read -rsp "air-Q password: " AIRQ_DEVICE_PASSWORD
-printf '\n'
-printf '%s' "$AIRQ_DEVICE_PASSWORD" | secret-tool store \
-  --label='air-Q device password' \
-  application omarchy-airq serial "$AIRQ_SERIAL"
-unset AIRQ_DEVICE_PASSWORD
-```
+slash. Open the widget and enter the device password when prompted. The plugin
+stores it in GNOME Keyring using the Secret Service tools included with Omarchy.
 
 ## Controls
 
@@ -79,7 +66,9 @@ Settings can be changed through the Omarchy bar widget settings or with
 The plugin talks directly to the air-Q device over the local network and does
 not use a cloud service. The device password is looked up in the desktop Secret
 Service and is never stored in Omarchy's `shell.json` or passed in process
-arguments. The encrypted API response is decrypted inside the plugin.
+arguments. Passwords entered in the panel are masked, sent to the keyring over
+stdin, and cleared from the field as soon as the storage helper starts. The
+encrypted API response is decrypted inside the plugin.
 Responses are capped at 64 KiB before the shell collects, decodes, or decrypts
 them, and device-provided status text is always rendered as inert text.
 

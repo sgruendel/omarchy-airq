@@ -11,6 +11,11 @@ BarWidget {
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
   readonly property color healthColor: panelLoader.item ? panelLoader.item.healthColor : Color.muted
   readonly property color performanceColor: panelLoader.item ? panelLoader.item.performanceColor : Color.muted
+  readonly property string pluginDir: {
+    if (!bar || !("barWidgetRegistry" in bar)) return ""
+    var metadata = bar.barWidgetRegistry.metadataFor(moduleName)
+    return metadata && metadata.sourceDir ? String(metadata.sourceDir) : ""
+  }
 
   function injectPanel() {
     var target = panelLoader.item
@@ -19,10 +24,16 @@ BarWidget {
     if ("settings" in target) target.settings = root.settings
     if ("anchorItem" in target) target.anchorItem = button
     if ("hostWidget" in target) target.hostWidget = root
+    if ("pluginDir" in target) target.pluginDir = root.pluginDir
   }
 
   function refresh() {
     if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()
+  }
+
+  function credentialStored() {
+    if (panelLoader.item && panelLoader.item.credentialStored)
+      panelLoader.item.credentialStored()
   }
 
   function open() {
@@ -46,6 +57,7 @@ BarWidget {
 
   onBarChanged: injectPanel()
   onSettingsChanged: injectPanel()
+  onPluginDirChanged: injectPanel()
 
   Loader {
     id: panelLoader
