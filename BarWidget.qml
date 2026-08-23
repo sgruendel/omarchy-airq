@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -8,8 +9,8 @@ BarWidget {
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
-  readonly property color healthColor: panelLoader.item ? panelLoader.item.healthColor : "#6b7280"
-  readonly property color performanceColor: panelLoader.item ? panelLoader.item.performanceColor : "#6b7280"
+  readonly property color healthColor: panelLoader.item ? panelLoader.item.healthColor : Color.muted
+  readonly property color performanceColor: panelLoader.item ? panelLoader.item.performanceColor : Color.muted
 
   function injectPanel() {
     var target = panelLoader.item
@@ -25,7 +26,7 @@ BarWidget {
   }
 
   function open() {
-    if (panelLoader.item && panelLoader.item.openFromHotkey) panelLoader.item.openFromHotkey()
+    if (panelLoader.item && panelLoader.item.open) panelLoader.item.open()
   }
 
   function close() {
@@ -55,6 +56,17 @@ BarWidget {
       root.injectPanel()
       Qt.callLater(root.injectPanel)
     }
+  }
+
+  IpcHandler {
+    target: root.moduleName
+
+    function refresh(): void { root.broadcast("refresh") }
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function show(): void { root.open() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.togglePanel() }
   }
 
   WidgetButton {

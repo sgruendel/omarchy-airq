@@ -53,6 +53,13 @@ unset AIRQ_DEVICE_PASSWORD
 - `O` in the panel: open the device page
 - `Esc`: close the panel
 
+The widget also exposes `refresh`, `open`, `close`, `show`, `hide`, and
+`toggle` over Omarchy shell IPC. For example:
+
+```bash
+omarchy shell sgruendel.airq refresh
+```
+
 ## Configuration
 
 Settings can be changed through the Omarchy bar widget settings or with
@@ -62,10 +69,10 @@ Settings can be changed through the Omarchy bar widget settings or with
 | --- | ---: | --- |
 | `host` | empty | Device hostname or IP address |
 | `serial` | empty | Device serial number |
-| `refreshSeconds` | `30` | Polling interval in seconds (minimum 10) |
-| `radonWarning` | `100` | Radon warning threshold in Bq/m³ |
-| `indexGreenThreshold` | `80` | Minimum green health/performance index |
-| `indexYellowThreshold` | `60` | Minimum yellow health/performance index |
+| `refreshSeconds` | `30` | Polling interval in seconds (10–3600) |
+| `radonWarning` | `100` | Radon warning threshold in Bq/m³ (10–10000) |
+| `indexGreenThreshold` | `80` | Minimum green health/performance index (0–100) |
+| `indexYellowThreshold` | `60` | Minimum yellow health/performance index (0–100) |
 
 ## Security and privacy
 

@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -8,13 +7,15 @@ import "Model.js" as Model
 Panel {
   id: root
   moduleName: "sgruendel.airq"
-  ipcTarget: "sgruendel.airq"
-  manageIpc: false
 
   property var anchorItem: null
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
-  readonly property color contentForeground: bar ? bar.foreground : Color.foreground
+  readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
+  readonly property color healthyColor: "#4caf50"
+  readonly property color warningColor: "#fbc02d"
+  readonly property color criticalColor: bar ? bar.urgent : Color.urgent
+  readonly property color unavailableColor: Color.muted
 
   property var readings: null
   property string devicePassword: ""
@@ -23,16 +24,17 @@ Panel {
   property bool stale: false
   property int retries: 0
   property real nowMs: Date.now()
+  property bool credentialTimedOut: false
+  property bool fetchTimedOut: false
 
   readonly property string configuredHost: String(setting("host", ""))
     .replace(/^https?:\/\//, "").replace(/\/+$/, "")
   readonly property string configuredSerial: String(setting("serial", ""))
-  readonly property int refreshSeconds: Math.max(10, parseInt(setting("refreshSeconds", 30), 10) || 30)
-  readonly property real warningThreshold: parseFloat(String(setting("radonWarning", 100))) || 100
-  readonly property real indexGreenThreshold: Math.max(0, Math.min(100,
-    parseFloat(String(setting("indexGreenThreshold", 80))) || 80))
-  readonly property real indexYellowThreshold: Math.max(0, Math.min(indexGreenThreshold,
-    parseFloat(String(setting("indexYellowThreshold", 60))) || 60))
+  readonly property int refreshSeconds: integerSetting("refreshSeconds", 30, 10, 3600)
+  readonly property int warningThreshold: integerSetting("radonWarning", 100, 10, 10000)
+  readonly property int indexGreenThreshold: integerSetting("indexGreenThreshold", 80, 0, 100)
+  readonly property int indexYellowThreshold: Math.min(indexGreenThreshold,
+    integerSetting("indexYellowThreshold", 60, 0, 100))
   readonly property real radonValue: Model.number(readings, "radon")
   readonly property real healthIndex: Model.indexPercent(readings, "health")
   readonly property real performanceIndex: Model.indexPercent(readings, "performance")
@@ -57,11 +59,17 @@ Panel {
   readonly property string measurementAge: readings
     ? Model.measurementAge(readings.timestamp, nowMs) : "unknown age"
 
+  function integerSetting(name, fallback, minimum, maximum) {
+    var value = parseInt(String(setting(name, fallback)), 10)
+    if (!isFinite(value)) value = fallback
+    return Math.max(minimum, Math.min(maximum, value))
+  }
+
   function indexColor(state) {
-    if (state === "green") return "#4caf50"
-    if (state === "yellow") return "#fbc02d"
-    if (state === "red") return "#e53935"
-    return "#6b7280"
+    if (state === "green") return healthyColor
+    if (state === "yellow") return warningColor
+    if (state === "red") return criticalColor
+    return unavailableColor
   }
 
   function setCenterHoverRevealSuppressed(value) {
@@ -69,12 +77,6 @@ Panel {
   }
 
   function open() {
-    setCenterHoverRevealSuppressed(false)
-    controller.show()
-    refresh()
-  }
-
-  function openFromHotkey() {
     controller.show()
     refresh()
     Qt.callLater(function() {
@@ -89,13 +91,7 @@ Panel {
 
   function toggle() {
     if (opened) close()
-    else openFromHotkey()
-  }
-
-  function closeForPopoutSwitch() {
-    popoutSwitchClosing = true
-    close()
-    Qt.callLater(function() { root.popoutSwitchClosing = false })
+    else open()
   }
 
   function switchPanel(direction) {
@@ -107,6 +103,17 @@ Panel {
   function refresh() {
     retries = 0
     fetch()
+  }
+
+  function failNow(message) {
+    fetching = false
+    stale = readings !== null
+    fetchError = message
+  }
+
+  function processError(raw, fallback) {
+    var lines = String(raw || "").trim().split(/\r?\n/)
+    return lines[0] ? fallback + ": " + lines[0] : fallback
   }
 
   function fetch() {
@@ -123,12 +130,16 @@ Panel {
         "application", "omarchy-airq",
         "serial", configuredSerial
       ]
+      credentialTimedOut = false
+      credentialTimeout.restart()
       credentialProc.running = true
       return
     }
     fetching = true
     fetchProc.command = ["curl", "-fsS", "--connect-timeout", "3", "--max-time", "8",
       "http://" + configuredHost + "/data/"]
+    fetchTimedOut = false
+    fetchTimeout.restart()
     fetchProc.running = true
   }
 
@@ -136,6 +147,7 @@ Panel {
     fetching = false
     var parsed = Model.parseDataResponse(raw, devicePassword)
     if (!parsed) {
+      devicePassword = ""
       scheduleRetry("Could not read or decrypt the air-Q response")
       return
     }
@@ -147,9 +159,12 @@ Panel {
   }
 
   function scheduleRetry(message) {
+    fetching = false
     stale = readings !== null
-    fetchError = message
-    if (retries >= 3) return
+    if (retries >= 3) {
+      fetchError = message
+      return
+    }
     retries++
     fetchError = message + " · retry " + retries + "/3"
     retryTimer.restart()
@@ -163,20 +178,23 @@ Panel {
 
   Process {
     id: credentialProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var secret = String(text || "").replace(/\r?\n$/, "")
-        if (!secret) {
-          root.fetching = false
-          root.stale = root.readings !== null
-          root.fetchError = "Device password is missing from the keyring"
-          return
-        }
-        root.devicePassword = secret
-        root.fetchError = ""
-        Qt.callLater(root.fetch)
+    stdout: StdioCollector { id: credentialStdout; waitForEnd: true }
+    stderr: StdioCollector { id: credentialStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      credentialTimeout.stop()
+      if (root.credentialTimedOut) {
+        root.credentialTimedOut = false
+        return
       }
+      var secret = String(credentialStdout.text || "").replace(/\r?\n$/, "")
+      if (exitCode !== 0 || !secret) {
+        root.failNow(root.processError(credentialStderr.text,
+          "Device password is missing or secret-tool/keyring is unavailable"))
+        return
+      }
+      root.devicePassword = secret
+      root.fetchError = ""
+      Qt.callLater(root.fetch)
     }
   }
 
@@ -187,9 +205,19 @@ Panel {
 
   Process {
     id: fetchProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.applyDeviceResponse(text)
+    stdout: StdioCollector { id: fetchStdout; waitForEnd: true }
+    stderr: StdioCollector { id: fetchStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      fetchTimeout.stop()
+      if (root.fetchTimedOut) {
+        root.fetchTimedOut = false
+        return
+      }
+      if (exitCode !== 0) {
+        root.scheduleRetry(root.processError(fetchStderr.text, "air-Q request failed"))
+        return
+      }
+      root.applyDeviceResponse(fetchStdout.text)
     }
   }
 
@@ -199,6 +227,26 @@ Panel {
     id: retryTimer
     interval: 2500
     onTriggered: root.fetch()
+  }
+
+  Timer {
+    id: credentialTimeout
+    interval: 10000
+    onTriggered: {
+      root.credentialTimedOut = true
+      credentialProc.running = false
+      root.failNow("secret-tool did not start or respond within 10 seconds")
+    }
+  }
+
+  Timer {
+    id: fetchTimeout
+    interval: 10000
+    onTriggered: {
+      root.fetchTimedOut = true
+      fetchProc.running = false
+      root.scheduleRetry("air-Q request timed out")
+    }
   }
 
   Timer {
@@ -265,8 +313,8 @@ Panel {
 
                 Text {
                   text: "RADON"
-                  color: Qt.darker(root.contentForeground, 1.4)
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  color: Qt.darker(root.barForeground, 1.4)
+                  font.family: root.contentFontFamily
                   font.pixelSize: Style.font.bodySmall
                   font.letterSpacing: 1
                 }
@@ -274,9 +322,9 @@ Panel {
                 Row {
                   spacing: Style.space(5)
                   Text {
-                    text: Model.reading(root.readings, "radon", root.radonValue < 10 ? 1 : 0, "").replace(" ", "")
-                    color: root.needsAttention ? (root.bar ? root.bar.urgent : Color.urgent) : root.contentForeground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    text: Model.reading(root.readings, "radon", root.radonValue < 10 ? 1 : 0, "")
+                    color: root.needsAttention ? root.criticalColor : root.barForeground
+                    font.family: root.contentFontFamily
                     font.pixelSize: 52
                     font.bold: true
                   }
@@ -284,8 +332,8 @@ Panel {
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: Style.space(9)
                     text: "Bq/m³"
-                    color: Qt.darker(root.contentForeground, 1.35)
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    color: Qt.darker(root.barForeground, 1.35)
+                    font.family: root.contentFontFamily
                     font.pixelSize: Style.font.body
                   }
                 }
@@ -297,22 +345,22 @@ Panel {
 
                 Text {
                   text: root.radonState.toUpperCase()
-                  color: root.needsAttention ? (root.bar ? root.bar.urgent : Color.urgent) : root.contentForeground
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  color: root.needsAttention ? root.criticalColor : root.barForeground
+                  font.family: root.contentFontFamily
                   font.pixelSize: Style.font.title
                   font.bold: true
                 }
                 Text {
                   text: "Health " + Model.score(root.readings, "health")
                     + "   Performance " + Model.score(root.readings, "performance")
-                  color: Qt.darker(root.contentForeground, 1.35)
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  color: Qt.darker(root.barForeground, 1.35)
+                  font.family: root.contentFontFamily
                   font.pixelSize: Style.font.body
                 }
                 Text {
                   text: root.fetching ? "Refreshing…" : "Measured " + root.measurementAge
-                  color: Qt.darker(root.contentForeground, 1.55)
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  color: Qt.darker(root.barForeground, 1.55)
+                  font.family: root.contentFontFamily
                   font.pixelSize: Style.font.bodySmall
                 }
               }
@@ -333,8 +381,8 @@ Panel {
                 text: modelData
                 wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter
-                color: Qt.darker(root.contentForeground, 1.35)
-                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                color: Qt.darker(root.barForeground, 1.35)
+                font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
                 font.italic: true
               }
@@ -346,17 +394,16 @@ Panel {
             width: parent.width
             height: visible ? errorText.implicitHeight + Style.space(18) : 0
             radius: Style.cornerRadius
-            color: Qt.rgba((root.bar ? root.bar.urgent : Color.urgent).r,
-                           (root.bar ? root.bar.urgent : Color.urgent).g,
-                           (root.bar ? root.bar.urgent : Color.urgent).b, 0.14)
+            color: Qt.rgba(root.criticalColor.r, root.criticalColor.g,
+                           root.criticalColor.b, 0.14)
 
             Text {
               id: errorText
               anchors.centerIn: parent
               width: parent.width - Style.space(24)
               text: root.fetchError
-              color: root.bar ? root.bar.urgent : Color.urgent
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              color: root.criticalColor
+              font.family: root.contentFontFamily
               font.pixelSize: Style.font.body
               horizontalAlignment: Text.AlignHCenter
               wrapMode: Text.Wrap
@@ -366,7 +413,7 @@ Panel {
           Rectangle {
             width: parent.width
             height: Style.spacing.hairline
-            color: root.contentForeground
+            color: root.barForeground
             opacity: 0.12
           }
 
@@ -379,11 +426,12 @@ Panel {
               model: root.sensorCards
 
               Rectangle {
+                id: sensorCard
                 required property var modelData
                 width: Style.space(224)
                 height: Style.space(68)
                 radius: Style.cornerRadius
-                color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.055)
+                color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.055)
 
                 Column {
                   anchors.left: parent.left
@@ -392,16 +440,16 @@ Panel {
                   spacing: Style.space(4)
 
                   Text {
-                    text: parent.parent.modelData.label
-                    color: Qt.darker(root.contentForeground, 1.45)
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    text: sensorCard.modelData.label
+                    color: Qt.darker(root.barForeground, 1.45)
+                    font.family: root.contentFontFamily
                     font.pixelSize: Style.font.bodySmall
                     font.letterSpacing: 1
                   }
                   Text {
-                    text: parent.parent.modelData.text
-                    color: root.contentForeground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    text: sensorCard.modelData.text
+                    color: root.barForeground
+                    font.family: root.contentFontFamily
                     font.pixelSize: Style.font.title
                   }
                 }
@@ -413,8 +461,8 @@ Panel {
             visible: root.readings !== null
             width: parent.width
             text: "Measured " + root.measurementAge + (root.stale ? " · stale" : "")
-            color: Qt.darker(root.contentForeground, 1.55)
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            color: Qt.darker(root.barForeground, 1.55)
+            font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
             horizontalAlignment: Text.AlignHCenter
           }
@@ -422,8 +470,8 @@ Panel {
           Text {
             width: parent.width
             text: "R refresh   ·   O open device   ·   Esc close"
-            color: Qt.darker(root.contentForeground, 1.55)
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            color: Qt.darker(root.barForeground, 1.55)
+            font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
             horizontalAlignment: Text.AlignHCenter
           }

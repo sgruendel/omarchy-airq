@@ -41,26 +41,38 @@
       },
       {
         "key": "refreshSeconds",
-        "type": "number",
+        "type": "integer",
         "label": "Refresh interval (seconds)",
+        "min": 10,
+        "max": 3600,
+        "step": 5,
         "defaultValue": 30
       },
       {
         "key": "radonWarning",
-        "type": "number",
+        "type": "integer",
         "label": "Radon warning (Bq/m³)",
+        "min": 10,
+        "max": 10000,
+        "step": 10,
         "defaultValue": 100
       },
       {
         "key": "indexGreenThreshold",
-        "type": "number",
+        "type": "integer",
         "label": "Index green threshold (%)",
+        "min": 0,
+        "max": 100,
+        "step": 1,
         "defaultValue": 80
       },
       {
         "key": "indexYellowThreshold",
-        "type": "number",
+        "type": "integer",
         "label": "Index yellow threshold (%)",
+        "min": 0,
+        "max": 100,
+        "step": 1,
         "defaultValue": 60
       }
     ]
