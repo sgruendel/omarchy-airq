@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "sgruendel.airq",
+  "name": "air-Q",
+  "version": "1.0.0",
+  "author": "Stefan Gründel",
+  "license": "MIT",
+  "description": "Live indoor air quality from a local air-Q device",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "air-Q",
+    "description": "Health and performance status with a complete local sensor panel",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "host": "",
+      "serial": "",
+      "refreshSeconds": 30,
+      "radonWarning": 100,
+      "indexGreenThreshold": 80,
+      "indexYellowThreshold": 60
+    },
+    "schema": [
+      {
+        "key": "host",
+        "type": "string",
+        "label": "Device host",
+        "defaultValue": ""
+      },
+      {
+        "key": "serial",
+        "type": "string",
+        "label": "Serial number",
+        "defaultValue": ""
+      },
+      {
+        "key": "refreshSeconds",
+        "type": "number",
+        "label": "Refresh interval (seconds)",
+        "defaultValue": 30
+      },
+      {
+        "key": "radonWarning",
+        "type": "number",
+        "label": "Radon warning (Bq/m³)",
+        "defaultValue": 100
+      },
+      {
+        "key": "indexGreenThreshold",
+        "type": "number",
+        "label": "Index green threshold (%)",
+        "defaultValue": 80
+      },
+      {
+        "key": "indexYellowThreshold",
+        "type": "number",
+        "label": "Index yellow threshold (%)",
+        "defaultValue": 60
+      }
+    ]
+  }
+}
