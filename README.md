@@ -80,6 +80,8 @@ The plugin talks directly to the air-Q device over the local network and does
 not use a cloud service. The device password is looked up in the desktop Secret
 Service and is never stored in Omarchy's `shell.json` or passed in process
 arguments. The encrypted API response is decrypted inside the plugin.
+Responses are capped at 64 KiB before the shell collects, decodes, or decrypts
+them, and device-provided status text is always rendered as inert text.
 
 Like other Quickshell plugins, this plugin is not sandboxed. Review the source
 before installing it.

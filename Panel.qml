@@ -16,6 +16,7 @@ Panel {
   readonly property color warningColor: "#fbc02d"
   readonly property color criticalColor: bar ? bar.urgent : Color.urgent
   readonly property color unavailableColor: Color.muted
+  readonly property int maxResponseBytes: 64 * 1024
 
   property var readings: null
   property string devicePassword: ""
@@ -48,12 +49,15 @@ Panel {
   readonly property string radonState: Model.radonState(radonValue, warningThreshold)
   readonly property bool needsAttention: stale || fetchError !== ""
     || (isFinite(radonValue) && radonValue >= warningThreshold)
-  readonly property string tooltipText: readings
+  readonly property string tooltipPlainText: readings
     ? "Health: " + Model.score(readings, "health") + " (" + healthState + ")"
       + "\nPerformance: " + Model.score(readings, "performance") + " (" + performanceState + ")"
       + "\n" + Model.tooltipText(readings, nowMs, stale)
       + (fetchError !== "" ? "\n" + fetchError : "")
     : (fetchError !== "" ? "air-Q: " + fetchError : "air-Q: fetching…")
+  // The bar owns the tooltip Text item and leaves it in AutoText mode. Supply
+  // an escaped rich-text document so device/error strings stay inert there.
+  readonly property string tooltipText: Model.inertTooltipText(tooltipPlainText)
   readonly property var sensorCards: Model.metricRows(readings)
   readonly property var sensorStatus: Model.statusLines(readings)
   readonly property string measurementAge: readings
@@ -137,6 +141,7 @@ Panel {
     }
     fetching = true
     fetchProc.command = ["curl", "-fsS", "--connect-timeout", "3", "--max-time", "8",
+      "--max-filesize", String(maxResponseBytes),
       "http://" + configuredHost + "/data/"]
     fetchTimedOut = false
     fetchTimeout.restart()
@@ -211,6 +216,10 @@ Panel {
       fetchTimeout.stop()
       if (root.fetchTimedOut) {
         root.fetchTimedOut = false
+        return
+      }
+      if (exitCode === 63) {
+        root.scheduleRetry("air-Q response exceeded the 64 KiB limit")
         return
       }
       if (exitCode !== 0) {
@@ -379,6 +388,7 @@ Panel {
                 required property string modelData
                 width: parent.width
                 text: modelData
+                textFormat: Text.PlainText
                 wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter
                 color: Qt.darker(root.barForeground, 1.35)
@@ -402,6 +412,7 @@ Panel {
               anchors.centerIn: parent
               width: parent.width - Style.space(24)
               text: root.fetchError
+              textFormat: Text.PlainText
               color: root.criticalColor
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.body

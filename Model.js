@@ -123,6 +123,7 @@ function decryptBlock(block, words) {
 }
 
 var B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+var MAX_RESPONSE_CHARACTERS = 64 * 1024
 
 function base64Decode(text) {
   var output = []
@@ -214,7 +215,12 @@ function decryptContent(content, password) {
 
 function parseDataResponse(raw, password) {
   try {
-    var envelope = JSON.parse(String(raw || ""))
+    var source = String(raw || "")
+    // curl enforces the byte ceiling before QML receives stdout. Keep this
+    // second boundary so no oversized string reaches JSON/base64/AES if this
+    // function is reused with another input source.
+    if (source.length > MAX_RESPONSE_CHARACTERS) return null
+    var envelope = JSON.parse(source)
     if (!envelope || typeof envelope.content !== "string" || !password) return null
     var plain = decryptContent(envelope.content, password)
     if (!plain) return null
@@ -334,4 +340,13 @@ function tooltipText(data, nowMs, stale) {
   for (var i = 0; i < rows.length; i++) lines.push(rows[i].label + ": " + rows[i].text)
   lines.push("Measured " + measurementAge(data.timestamp, nowMs) + (stale ? " · stale" : ""))
   return lines.join("\n")
+}
+
+function inertTooltipText(text) {
+  var escaped = String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\r\n|\r|\n/g, "<br>")
+  return "<qt>" + escaped + "</qt>"
 }
