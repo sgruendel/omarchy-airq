@@ -1,5 +1,7 @@
 # air-Q for Omarchy
 
+![air-Q bar indicators and sensor detail panel in Omarchy](preview.png)
+
 A Quickshell bar widget for local [air-Q](https://www.air-q.com/) air quality
 monitors. Two dots show the health index first and performance index second.
 Each dot is green at or above 80%, yellow from 60% to 80%, and red below 60%;
