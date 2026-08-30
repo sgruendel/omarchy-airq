@@ -126,6 +126,13 @@ Panel {
     fetch()
   }
 
+  function focusCredentialField() {
+    Qt.callLater(function() {
+      if (root.opened && root.credentialEntryVisible && !credentialStoreProc.running)
+        credentialPasswordField.forceActiveFocus()
+    })
+  }
+
   function storeCredential() {
     if (credentialStoreProc.running || !configuredSerial) return
     var password = credentialPasswordField.text
@@ -296,6 +303,7 @@ Panel {
         root.credentialEntryVisible = true
         root.failNow(root.processError(credentialStoreStderr.text,
           "Could not save the device password to GNOME Keyring"))
+        root.focusCredentialField()
         return
       }
       root.credentialEntryVisible = false
@@ -378,6 +386,7 @@ Panel {
       root.credentialEntryVisible = stillCurrent
       if (stillCurrent)
         root.failNow("GNOME Keyring did not save the password within 10 seconds")
+      root.focusCredentialField()
     }
   }
 
