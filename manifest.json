@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "sgruendel.airq",
   "name": "air-Q",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Stefan Gründel",
   "license": "MIT",
   "description": "Live indoor air quality from a local air-Q device",
