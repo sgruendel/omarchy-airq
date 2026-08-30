@@ -676,13 +676,55 @@ Panel {
             horizontalAlignment: Text.AlignHCenter
           }
 
-          Text {
-            width: parent.width
-            text: "R refresh   ·   O open device   ·   Esc close"
-            color: Qt.darker(root.barForeground, 1.55)
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-            horizontalAlignment: Text.AlignHCenter
+          Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: Style.space(12)
+
+            Repeater {
+              model: [
+                { keys: "R", action: "Refresh" },
+                { keys: "O", action: "Open Device" },
+                { keys: "Esc", action: "Close" }
+              ]
+
+              delegate: Row {
+                id: shortcut
+
+                required property var modelData
+
+                height: keycap.height
+                spacing: Style.space(4)
+
+                Rectangle {
+                  id: keycap
+                  width: keyText.implicitWidth + Style.space(8)
+                  height: Math.max(Style.space(20), Style.font.caption + Style.space(6))
+                  radius: Math.min(Style.cornerRadius, height / 2)
+                  color: Qt.rgba(root.barForeground.r, root.barForeground.g,
+                                 root.barForeground.b, 0.08)
+
+                  Text {
+                    id: keyText
+                    anchors.centerIn: parent
+                    text: shortcut.modelData.keys
+                    color: root.barForeground
+                    opacity: 0.85
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+
+                Text {
+                  height: keycap.height
+                  text: shortcut.modelData.action
+                  color: root.barForeground
+                  opacity: 0.58
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  verticalAlignment: Text.AlignVCenter
+                }
+              }
+            }
           }
         }
       }
