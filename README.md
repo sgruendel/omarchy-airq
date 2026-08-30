@@ -85,6 +85,14 @@ secret-tool clear application omarchy-airq serial YOUR_AIRQ_SERIAL
 The second command is optional and removes the saved device password from the
 desktop keyring.
 
+## Development
+
+Run the model and decryption tests with:
+
+```bash
+node --test
+```
+
 ## License
 
 [MIT](LICENSE)

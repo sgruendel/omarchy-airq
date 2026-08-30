@@ -350,3 +350,28 @@ function inertTooltipText(text) {
     .replace(/\r\n|\r|\n/g, "<br>")
   return "<qt>" + escaped + "</qt>"
 }
+
+// Inert under QML (no `module` global); lets Node.js tests require this file.
+if (typeof module !== "undefined") {
+  module.exports = {
+    base64Decode: base64Decode,
+    utf8Encode: utf8Encode,
+    utf8Decode: utf8Decode,
+    deriveKey: deriveKey,
+    decryptContent: decryptContent,
+    parseDataResponse: parseDataResponse,
+    number: number,
+    uncertainty: uncertainty,
+    rounded: rounded,
+    reading: reading,
+    score: score,
+    indexPercent: indexPercent,
+    indexState: indexState,
+    radonState: radonState,
+    metricRows: metricRows,
+    statusLines: statusLines,
+    measurementAge: measurementAge,
+    tooltipText: tooltipText,
+    inertTooltipText: inertTooltipText
+  }
+}
