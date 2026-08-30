@@ -1,6 +1,5 @@
 const test = require("node:test")
 const assert = require("node:assert/strict")
-const crypto = require("node:crypto")
 const fs = require("node:fs")
 const path = require("node:path")
 
@@ -17,21 +16,10 @@ function loadModel() {
 
 const Model = loadModel()
 
-// Mirrors Model.deriveKey: UTF-8 password padded with 0x30 ("0") to 32 bytes.
-function deriveKey(password) {
-  const key = Buffer.alloc(32, 0x30)
-  Buffer.from(password, "utf8").copy(key)
-  return key
-}
-
-// Builds the base64(IV || AES-256-CBC(JSON)) envelope the air-Q /data/
-// endpoint returns.
-function encryptEnvelope(payload, password) {
-  const iv = crypto.randomBytes(16)
-  const cipher = crypto.createCipheriv("aes-256-cbc", deriveKey(password), iv)
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()])
-  return JSON.stringify({ content: Buffer.concat([iv, encrypted]).toString("base64") })
-}
+// Captured from a physical air-Q /data/ endpoint using this disposable password.
+const deviceResponse = fs.readFileSync(
+  path.join(__dirname, "fixtures", "device-response.json"), "utf8")
+const deviceResponsePassword = "password"
 
 function samplePayload() {
   return {
@@ -47,19 +35,33 @@ function samplePayload() {
   }
 }
 
-test("decrypts an encrypted device response", () => {
-  const parsed = Model.parseDataResponse(encryptEnvelope(samplePayload(), "device-password"), "device-password")
+test("decrypts a response captured from a real device", () => {
+  const parsed = Model.parseDataResponse(deviceResponse, deviceResponsePassword)
 
-  assert.equal(parsed.Status, "OK")
-  assert.equal(Model.number(parsed, "co2"), 654.3)
-  assert.equal(Model.uncertainty(parsed, "co2"), 12)
+  assert.deepEqual(parsed, {
+    tvoc: [8.9, 1.3],
+    performance: 800,
+    mold: [36.5, 20],
+    humidity_abs: [12.617, 0.77],
+    health: 994,
+    measuretime: 1960,
+    timestamp: 1788077138000,
+    dHdt: 0,
+    DeviceID: "c06df91b49d6dd86fb5013c1c7b7216f",
+    Status: "OK",
+    pressure_rel: [1016.44, 2.23],
+    humidity: [72.082, 7.63],
+    radon: [12.9, 9],
+    pressure: [991.09, 1],
+    temperature: [20.146, 1.05],
+    uptime: 41,
+    dewpt: [15.417, 0.96]
+  })
 })
 
 test("rejects a wrong password, malformed envelopes, and oversized input", () => {
-  const envelope = encryptEnvelope(samplePayload(), "device-password")
-
-  assert.equal(Model.parseDataResponse(envelope, "wrong-password"), null)
-  assert.equal(Model.parseDataResponse(envelope, ""), null)
+  assert.equal(Model.parseDataResponse(deviceResponse, "wrong-password"), null)
+  assert.equal(Model.parseDataResponse(deviceResponse, ""), null)
   assert.equal(Model.parseDataResponse("not json", "device-password"), null)
   assert.equal(Model.parseDataResponse("{}", "device-password"), null)
   assert.equal(Model.parseDataResponse(JSON.stringify({ content: 42 }), "device-password"), null)
